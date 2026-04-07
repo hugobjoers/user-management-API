@@ -18,6 +18,7 @@ auth = Auth()
 app = FastAPI()
 
 DbSession = Annotated[Session, Depends(get_db)]
+JWT = Annotated[str, Depends(auth.oauth2_scheme)]
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -25,6 +26,31 @@ class Token(BaseModel):
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
+    
+class PasswordChange(BaseModel):
+    password: str
+
+
+def get_authenticated_user(token: JWT, db: DbSession):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, auth.SECRET_KEY, algorithms=[auth.algorithm])
+        username = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+        username = uuid.UUID(username)
+    except (jwt.InvalidTokenError, ValueError):
+        raise credentials_exception
+
+    user = db.scalar(select(models.Users).where(models.Users.username == username))
+    if user is None:
+        raise credentials_exception
+
+    return user
 
 @app.get("/")
 def read_root():
@@ -81,9 +107,16 @@ def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: DbSess
         raise failed_login
     
     stmt = update(models.Users).where(models.Users.username == form_data.username).values(last_login=datetime.datetime.now(datetime.timezone.utc))
-    db.execute(stmt)
-    db.commit()
-
+    try:
+        db.execute(stmt)
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database error while changing password",
+        )
+    
     access_token = auth.create_access_token(
         data={"sub": str(user.username)}, expires_delta=datetime.timedelta(minutes=30)
     )
@@ -93,25 +126,30 @@ def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: DbSess
         "token": Token(access_token=access_token, token_type="bearer")
     }
     
-@app.get("/users/self", status_code=status.HTTP_200_OK)
-def get_current_user(token: Annotated[str, Depends(auth.oauth2_scheme)], db: DbSession):
-    """Return the currently logged in user. A JWT token is required for authentication."""
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token, auth.SECRET_KEY, algorithms=[auth.algorithm])
-        username = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-        username = uuid.UUID(username)
-    except (jwt.InvalidTokenError, ValueError):
-        raise credentials_exception                                                                                                         
-
-    user = db.scalar(select(models.Users).where(models.Users.username == username))
-    if user is None:
-        raise credentials_exception
+@app.put("/change_password", status_code=status.HTTP_200_OK)
+def change_password(change: PasswordChange, token: JWT, db:DbSession):
+    """Change the password for the currently logged in user. A JWT token is required for authentication."""
+    user = get_authenticated_user(token, db)
     
+    stmt = update(models.Users).where(models.Users.username == user.username).values(hashed_password=auth.hash_password(change.password))
+    try:
+        db.execute(stmt)
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database error while changing password",
+        )
+
+    return {
+        "message": "Password changed",
+        "username": str(user.username),
+    }
+    
+    
+@app.get("/users/self", status_code=status.HTTP_200_OK)
+def get_current_user(token: JWT, db: DbSession):
+    """Return the currently logged in user. A JWT token is required for authentication."""
+    user = get_authenticated_user(token, db)
     return user #Hashed password should not be returned in real world usage. This is mostly to show that the password is indeed hashed.

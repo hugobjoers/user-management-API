@@ -54,3 +54,34 @@ def test_authorized_user():
     )
     assert self_response.status_code == status.HTTP_401_UNAUTHORIZED
     
+def test_change_password():
+    password = "12345"
+    users_response = create_user(password=password)
+    assert users_response.status_code == status.HTTP_201_CREATED
+    username = users_response.json()["username"]
+    login_response = client.post(
+        "/login",
+        data={"username": username, "password": password}
+    )
+    assert login_response.status_code == status.HTTP_200_OK
+    access_token = login_response.json()["token"]["access_token"]
+    new_password = "new-password"
+    change_password_response = client.put(
+        "/change_password",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={"password" : new_password}
+    )
+    assert change_password_response.status_code == status.HTTP_200_OK
+    login_response = client.post(
+        "/login",
+        data={"username": username, "password": new_password}
+    )
+    assert login_response.status_code == status.HTTP_200_OK
+    
+    login_response = client.post(
+        "/login",
+        data={"username": username, "password": password}
+    )
+    assert login_response.status_code == status.HTTP_401_UNAUTHORIZED
+    
+    

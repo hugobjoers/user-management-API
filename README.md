@@ -120,3 +120,31 @@ Authorization: Bearer <access_token>
 - `401 Unauthorized` if token is missing, invalid, or user no longer exists.
 
 ---
+
+### `PUT /change_password`
+Changes the password for the currently authenticated user.
+
+**Headers**
+```http
+Authorization: Bearer <access_token>
+```
+
+**Request body (JSON)**
+```json
+{
+	"password": "new-password"
+}
+```
+
+**Responses**
+- `200 OK`
+```json
+{
+	"message": "Password changed",
+	"username": "<uuid>"
+}
+```
+- `401 Unauthorized` if token is missing, invalid, or user no longer exists.
+- `500 Internal Server Error` for unexpected database errors.
+
+---
