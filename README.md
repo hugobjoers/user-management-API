@@ -2,7 +2,7 @@
 
 ## Description
 User Management API is a proof-of-concept API for account creation and authentication.
-It is built with FastAPI, SQLAlchemy, PostgreSQL, JWT, and password hashing (bcrypt via passlib).
+It is built with FastAPI and PostgreSQL with SQLAlchemy.
 
 
 ## Setup
